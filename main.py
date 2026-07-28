@@ -10,49 +10,46 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
-# Allow your frontend to talk to this backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Change to your frontend domain in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Serve uploaded images so the frontend can display them
 os.makedirs("uploads", exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 DB_NAME = "rakhi_vaibhav.db"
 SECRET_KEY = "super-secret-rakhi-key-change-in-production"
-ADMIN_PASSCODE = "admin123" # Change this to your desired admin passcode
+ADMIN_PASSCODE = "admin123"
 
-# --- Database Initialization ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+    # Added 'stock' column
     c.execute('''CREATE TABLE IF NOT EXISTS products
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, price REAL, mrp REAL,
-                  tag TEXT, image_url TEXT, rating REAL, reviews INTEGER)''')
+                  tag TEXT, image_url TEXT, rating REAL, reviews INTEGER, stock INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS settings
                  (key TEXT PRIMARY KEY, value TEXT)''')
     
-    # Seed default products if empty
     c.execute("SELECT COUNT(*) FROM products")
     if c.fetchone()[0] == 0:
+        # Added stock values to default products (e.g., 50, 10, 5)
         default_products = [
-            ("Rudraksha Premium Rakhi", 299, 499, "Bestseller", None, 4.8, 125),
-            ("Silver Om Rakhi", 599, 799, "Premium", None, 4.9, 89),
-            ("Kids Superhero Rakhi", 199, 249, "Kids", None, 4.5, 210),
-            ("Kundan Designer Rakhi", 449, 599, "New", None, 4.7, 56)
+            ("Rudraksha Premium Rakhi", 299, 499, "Bestseller", None, 4.8, 125, 50),
+            ("Silver Om Rakhi", 599, 799, "Premium", None, 4.9, 89, 10),
+            ("Kids Superhero Rakhi", 199, 249, "Kids", None, 4.5, 210, 2),
+            ("Kundan Designer Rakhi", 449, 599, "New", None, 4.7, 56, 0)
         ]
-        c.executemany("INSERT INTO products (name, price, mrp, tag, image_url, rating, reviews) VALUES (?,?,?,?,?,?,?)", default_products)
+        c.executemany("INSERT INTO products (name, price, mrp, tag, image_url, rating, reviews, stock) VALUES (?,?,?,?,?,?,?,?)", default_products)
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- Auth Security ---
 security = HTTPBearer()
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
@@ -62,11 +59,8 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-# --- Models ---
 class LoginModel(BaseModel):
     passcode: str
-
-# --- API Endpoints ---
 
 @app.post("/api/admin/login")
 def admin_login(data: LoginModel):
@@ -80,7 +74,8 @@ def admin_login(data: LoginModel):
 def get_products():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT id, name, price, mrp, tag, image_url, rating, reviews FROM products ORDER BY id DESC")
+    # Fetching stock as well
+    c.execute("SELECT id, name, price, mrp, tag, image_url, rating, reviews, stock FROM products ORDER BY id DESC")
     rows = c.fetchall()
     conn.close()
     
@@ -88,7 +83,8 @@ def get_products():
     for row in rows:
         products.append({
             "id": row[0], "name": row[1], "price": row[2], "mrp": row[3],
-            "tag": row[4], "image_url": row[5], "rating": row[6], "reviews": row[7]
+            "tag": row[4], "image_url": row[5], "rating": row[6], "reviews": row[7],
+            "stock": row[8] if row[8] is not None else 999 # Default to 999 if null
         })
     return products
 
@@ -98,6 +94,7 @@ async def add_product(
     price: float = Form(...),
     mrp: float = Form(0),
     tag: str = Form(None),
+    stock: int = Form(999), # Default stock 999
     file: UploadFile = File(None),
     _: bool = Depends(verify_token)
 ):
@@ -110,15 +107,15 @@ async def add_product(
 
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("INSERT INTO products (name, price, mrp, tag, image_url, rating, reviews) VALUES (?,?,?,?,?,?,?)",
-              (name, price, mrp, tag, image_url, 5.0, 0))
+    c.execute("INSERT INTO products (name, price, mrp, tag, image_url, rating, reviews, stock) VALUES (?,?,?,?,?,?,?,?)",
+              (name, price, mrp, tag, image_url, 5.0, 0, stock))
     conn.commit()
     prod_id = c.lastrowid
     conn.close()
 
     return {
         "id": prod_id, "name": name, "price": price, "mrp": mrp,
-        "tag": tag, "image_url": image_url, "rating": 5.0, "reviews": 0
+        "tag": tag, "image_url": image_url, "rating": 5.0, "reviews": 0, "stock": stock
     }
 
 @app.delete("/api/products/{prod_id}")
@@ -130,7 +127,6 @@ def delete_product(prod_id: int, _: bool = Depends(verify_token)):
     conn.close()
     return {"detail": "Deleted"}
 
-# --- Settings (Logo) Endpoints ---
 @app.get("/api/settings/logo")
 def get_logo():
     conn = sqlite3.connect(DB_NAME)
