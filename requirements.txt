@@ -1,7 +1,7 @@
-fastapi==0.104.1
+fastapi==0.99.1
 uvicorn==0.24.0
 python-multipart==0.0.6
 PyJWT==2.8.0
-supabase==2.5.1
 cloudinary==1.40.0
-pydantic==2.5.2
+httpx==0.24.1
+pydantic==1.10.13
